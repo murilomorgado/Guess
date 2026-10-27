@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  /* Base reset */
+  body { margin: 0; font-size: 14px; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<title>Guess the Digit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: one centered card; tier selector, then a range bar that narrows as hints rule numbers out, then live odds */
+:root {
+  --bg: #eef1f6;
+  --surface: #ffffff;
+  --fg: #1b2333;
+  --muted: #5f6b80;
+  --line: #d5dbe6;
+  --accent: #2f5bea;
+  --low: #0e8f7a;
+  --high: #d2502a;
+  --win: #2f5bea;
+  --font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151d; --surface: #1a202b; --fg: #e8ecf4; --muted: #96a1b5; --line: #2c3442;
+    --accent: #7b9bff; --low: #3cc9b0; --high: #ff8a63; --win: #7b9bff; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151d; --surface: #1a202b; --fg: #e8ecf4; --muted: #96a1b5; --line: #2c3442;
+  --accent: #7b9bff; --low: #3cc9b0; --high: #ff8a63; --win: #7b9bff; color-scheme: dark;
+}
+html, body { min-height: 100%; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-display);
+  padding-inline: 16px; padding-block: 40px;
+  display: flex; justify-content: center; align-items: flex-start;
+}
+.card {
+  width: 100%; max-width: 32rem;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+  padding: 28px 24px; display: flex; flex-direction: column; gap: 22px;
+}
+h1 { margin: 0; font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; text-wrap: balance; }
+.sub { margin: 4px 0 0; color: var(--muted); font-size: 1rem; line-height: 1.5; }
+.label { font-family: var(--font-mono); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+
+/* Tier selector */
+.tiers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; background: var(--bg); border-radius: 12px; }
+.tiers button {
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  padding: 8px 4px; border-radius: 9px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font: 800 .95rem var(--font-display);
+}
+.tiers button small { font: 500 .7rem var(--font-mono); font-variant-numeric: tabular-nums; }
+.tiers button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgb(0 0 0 / .12); }
+.tiers button:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+
+/* Guess limit */
+.limit { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.limit .label { flex: 1 1 8rem; }
+.stepper { display: flex; align-items: center; gap: 4px; background: var(--bg); border-radius: 12px; padding: 4px; }
+.stepper button {
+  width: 2.25rem; height: 2.25rem; border: 0; border-radius: 9px; cursor: pointer;
+  background: var(--surface); color: var(--fg); font: 700 1.2rem var(--font-mono);
+}
+.stepper button:disabled { opacity: .35; cursor: default; }
+.stepper button:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.stepper output { min-width: 2.5rem; text-align: center; font: 700 1.2rem var(--font-mono); font-variant-numeric: tabular-nums; }
+.limit .note { flex-basis: 100%; font-size: .8rem; color: var(--muted); }
+
+/* Range bar: grey track = all numbers; blue = where the secret can still be */
+.range { display: flex; flex-direction: column; gap: 10px; }
+.range-text { margin: 0; font-size: 1.05rem; font-weight: 500; color: var(--muted); }
+.range-text strong { font-family: var(--font-mono); font-weight: 700; color: var(--fg); font-variant-numeric: tabular-nums; }
+.track { position: relative; height: 12px; }
+.bar { position: absolute; inset: 0; border-radius: 999px; overflow: hidden; background: var(--line); }
+.zone, .window { position: absolute; top: 0; bottom: 0; transition: left .3s, width .3s; }
+.zone.low { left: 0; background: color-mix(in srgb, var(--low) 55%, var(--line)); }
+.zone.high { right: 0; background: color-mix(in srgb, var(--high) 55%, var(--line)); }
+.window { background: var(--accent); min-width: 6px; }
+.track.over .window { background: var(--muted); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: .78rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.answer { position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--surface); border: 4px solid var(--high); }
+.scale { position: relative; height: 1rem; font-family: var(--font-mono); font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.scale span { position: absolute; top: 0; white-space: nowrap; }
+.scale.tight { font-size: .62rem; }
+@media (max-width: 420px) { .scale.tight .odd { display: none; } }
+.divider { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--surface); opacity: .9; }
+
+/* Numpad */
+.pad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 24rem; align-self: center; }
+.pad button {
+  font: 700 1.35rem var(--font-mono); font-variant-numeric: tabular-nums;
+  height: 3.25rem; border-radius: 12px; cursor: pointer;
+  border: 1.5px solid var(--line); background: var(--bg); color: var(--fg);
+  transition: transform .08s, border-color .12s;
+}
+.pad button:hover:not(:disabled) { border-color: var(--accent); }
+.pad button:active:not(:disabled) { transform: scale(.96); }
+.pad button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.pad button:disabled { opacity: .35; cursor: default; text-decoration: line-through; }
+.pad .fn { font-size: 1.1rem; color: var(--muted); }
+.pad .ok { background: var(--accent); border-color: var(--accent); color: var(--surface); font: 800 1rem var(--font-display); }
+.pad .ok:disabled { text-decoration: none; }
+
+/* Type-in */
+form { display: flex; gap: 8px; width: 100%; max-width: 15rem; align-self: center; }
+#guess { text-align: center; }
+.err { text-align: center; }
+#guess {
+  flex: 1; min-width: 0;
+  font: 700 1.25rem var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: .08em;
+  padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line);
+  background: var(--bg); color: var(--fg);
+}
+#guess:focus { outline: none; border-color: var(--accent); }
+#guess[aria-invalid="true"] { border-color: var(--high); }
+#go {
+  font: 800 1rem var(--font-display); padding: 0 20px; border-radius: 12px;
+  background: var(--accent); color: var(--surface); border: 0; cursor: pointer;
+}
+#go:disabled { opacity: .4; cursor: default; }
+#go:focus-visible, #again:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+.err { margin: -14px 0 0; min-height: 1.1rem; font-size: .85rem; color: var(--high); }
+
+.status {
+  min-height: 3.5rem; display: flex; align-items: center; justify-content: center; text-align: center; gap: 12px;
+  font-size: 1.25rem; font-weight: 800; line-height: 1.3;
+}
+.status .arrow { font-family: var(--font-mono); font-size: 1.75rem; width: 1.5rem; text-align: center; flex: none; }
+.status.low { color: var(--low); }
+.status.high { color: var(--high); }
+.status.win { color: var(--win); }
+.status.lose { color: var(--high); }
+.status.start { font-size: 1.05rem; font-weight: 500; color: var(--fg); }
+
+/* Odds */
+.odds {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px;
+  background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+}
+.odds > div { background: var(--surface); padding: 12px 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.odds .value { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.odds .note { font-size: .78rem; color: var(--muted); line-height: 1.35; }
+.odds .pay .value { color: var(--accent); }
+.meter { height: 6px; border-radius: 999px; background: var(--bg); overflow: hidden; margin-top: 2px; }
+.meter span { display: block; height: 100%; background: var(--accent); width: 10%; min-width: 2px; transition: width .3s; }
+
+.meta {
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  border-top: 1px solid var(--line); padding-top: 18px;
+  font-family: var(--font-mono); font-size: .8rem; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.meta > div:first-child { flex: none; }
+.meta strong { color: var(--fg); font-size: 1rem; }
+.history { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.chip { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.chip.low { color: var(--low); border-color: var(--low); }
+.chip.high { color: var(--high); border-color: var(--high); }
+.chip.hit { color: var(--win); border-color: var(--win); }
+
+#again {
+  font: 800 1rem var(--font-display); padding: 12px 20px; border-radius: 12px;
+  background: var(--accent); color: var(--surface); border: 0; cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) { .pad button, .zone, .window, .meter span { transition: none; } }
+@media (max-width: 420px) {
+  .card { padding: 22px 16px; }
+}
+</style>
+</head>
+<body>
+<main class="card">
+  <header>
+    <h1>Guess the Digit</h1>
+    <p class="sub" id="intro">Pick a tier and how many guesses you want. I'll draw a secret number, and after each guess I'll tell you if it's too low or too high</p>
+  </header>
+
+  <div class="tiers" role="group" aria-label="Number size" id="tiers"></div>
+
+  <div class="limit">
+    <span class="label">Guesses allowed</span>
+    <div class="stepper">
+      <button id="minus" type="button" aria-label="Fewer guesses">−</button>
+      <output id="kval" aria-live="polite">3</output>
+      <button id="plus" type="button" aria-label="More guesses">+</button>
+    </div>
+    <span class="note" id="knote">Fewer guesses pay more. Locks after your first guess</span>
+  </div>
+
+  <div class="range" id="range">
+    <p class="range-text" id="rtext">The number is between <strong id="lo">0</strong> and <strong id="hi">9</strong></p>
+    <div class="track" id="track">
+      <div class="bar">
+        <div class="zone low" id="zlow"></div>
+        <div class="window" id="window"></div>
+        <div class="zone high" id="zhigh"></div>
+        <span class="divider" style="left:10%"></span><span class="divider" style="left:20%"></span><span class="divider" style="left:30%"></span><span class="divider" style="left:40%"></span><span class="divider" style="left:50%"></span><span class="divider" style="left:60%"></span><span class="divider" style="left:70%"></span><span class="divider" style="left:80%"></span><span class="divider" style="left:90%"></span>
+      </div>
+    </div>
+    <div class="scale" id="scale"></div>
+  </div>
+
+  <div class="status" id="status" role="status" aria-live="polite">
+    <span class="arrow" id="arrow" hidden></span><span id="msg"></span>
+  </div>
+
+  <form id="form" autocomplete="off">
+    <input id="guess" inputmode="none" aria-label="Your guess" placeholder="0">
+  </form>
+  <p class="err" id="err" aria-live="polite"></p>
+
+  <div class="pad" id="pad" aria-label="Number pad"></div>
+
+
+  <section class="odds" aria-label="Payout and guesses left">
+    <div class="pay">
+      <span class="label">Pays if right now</span>
+      <span class="value" id="paid">3.70×</span>
+      <span class="note">your one stake</span>
+    </div>
+    <div>
+      <span class="label">Guesses left</span>
+      <span class="value" id="gleft">3</span>
+      <span class="note" id="gnote">Run out and you lose</span>
+    </div>
+  </section>
+
+  <div class="meta">
+    <div>Guesses <strong id="count">0</strong></div>
+    <div class="history" id="history"></div>
+  </div>
+
+  <button id="again" hidden>Play again</button>
+</main>
+
+<script>
+(() => {
+  const RTP = 1;
+  const TIERS = [1, 2, 3, 4]; // digits; range is 0 to 10^d - 1, shown zero-padded
+  const $ = id => document.getElementById(id);
+  const tiersEl = $('tiers'), form = $('form'), input = $('guess'), err = $('err'), padEl = $('pad');
+  const statusEl = $('status'), arrow = $('arrow'), msg = $('msg');
+  const countEl = $('count'), historyEl = $('history'), again = $('again');
+  const track = $('track'), win = $('window'), rtext = $('rtext'), zlow = $('zlow'), zhigh = $('zhigh');
+  const scaleEl = $('scale');
+  const paidEl = $('paid');
+  const gleftEl = $('gleft'), kval = $('kval'), minus = $('minus'), plus = $('plus');
+  // One stake per game, K guesses allowed. A win pays in proportion to the numbers still left
+  // (half the numbers, half the pay). BEST[d][K-1] is the largest average "numbers left at a win within K guesses"
+  // that any guessing strategy can reach on a d-digit tier (computed exactly by dynamic programming).
+  // Dividing by it caps the return at RTP whatever strategy the player uses.
+  const BEST = {
+    1: [1, 1.9, 2.7, 3.4],
+    2: [1, 1.99, 2.97, 3.94, 4.9, 5.85, 6.79],
+    3: [1, 1.999, 2.997, 3.994, 4.99, 5.985, 6.979, 7.972, 8.964, 9.955],
+    4: [1, 1.9999, 2.9997, 3.9994, 4.999, 5.9985, 6.9979, 7.9972, 8.9964, 9.9955, 10.9945, 11.9934, 12.9922, 13.9909]
+  };
+  // Default to the most guesses allowed on each tier (one short of a guaranteed win).
+  const DEFAULT_K = { 1: 3, 2: 6, 3: 9, 4: 13 };
+  let digits = 1, max = 9, secret, lo, hi, guesses, done;
+  let K = DEFAULT_K[1];
+  // The last entry in BEST is the limit where always guessing the middle guarantees a win.
+  // Cap one below it, so every setting keeps a real chance of losing.
+  const maxK = () => BEST[digits].length - 1;
+  const payout = n => RTP * n / BEST[digits][K - 1];
+
+  const pad = n => String(n).padStart(digits, '0');
+  const fmtOdds = x => x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtPct = p => {
+    const v = p * 100;
+    if (v >= 10) return (Math.round(v * 10) / 10) + '%';
+    return Number(v.toPrecision(3)) + '%';
+  };
+
+  TIERS.forEach(d => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.id = 'tier-' + d;
+    b.innerHTML = `${d} digit${d > 1 ? 's' : ''}<small>${'0'.repeat(d)}–${'9'.repeat(d)}</small>`;
+    b.addEventListener('click', () => { digits = d; K = DEFAULT_K[d]; start(); });
+    tiersEl.appendChild(b);
+  });
+
+  // Numpad: phone layout, then delete / 0 / guess
+  const keys = [];
+  ['1','2','3','4','5','6','7','8','9','del','0','ok'].forEach(k => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.id = 'key-' + k;
+    if (k === 'del') { b.textContent = '⌫'; b.className = 'fn'; b.setAttribute('aria-label', 'Delete last digit'); b.addEventListener('click', backspace); }
+    else if (k === 'ok') { b.textContent = 'Guess'; b.className = 'ok'; b.addEventListener('click', submit); }
+    else { b.textContent = k; b.addEventListener('click', () => typeDigit(k)); keys[+k] = b; }
+    padEl.appendChild(b);
+  });
+  const okKey = $('key-ok'), delKey = $('key-del');
+
+  function typeDigit(k) {
+    if (done) return;
+    setErr('');
+    if (input.value.length >= digits) return; // full: ignore extra digits
+    input.value += k;
+  }
+  function backspace() {
+    if (done) return;
+    setErr('');
+    input.value = input.value.slice(0, -1);
+  }
+  function submit() {
+    if (done) return;
+    const raw = input.value.trim();
+    if (!raw) { setErr(`Enter a number from ${pad(lo)} to ${pad(hi)}`); return; }
+    guess(Number(raw));
+    input.value = '';
+  }
+
+  function start() {
+    max = 10 ** digits - 1;
+    secret = Math.floor(Math.random() * (max + 1));
+    lo = 0; hi = max; guesses = []; done = false;
+    tiersEl.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.id === 'tier-' + digits)));
+    track.querySelectorAll('.answer').forEach(t => t.remove()); track.classList.remove('over');
+    input.value = ''; input.maxLength = digits; input.placeholder = pad(0) + '–' + pad(max);
+    setErr('');
+    drawScale();
+    statusEl.className = 'status start'; arrow.textContent = ''; arrow.hidden = true;
+    countEl.textContent = '0'; historyEl.innerHTML = '';
+    again.hidden = true;
+    msg.textContent = `I picked a number from ${pad(0)} to ${pad(max)}. You have ${K} ${K === 1 ? 'guess' : 'guesses'}. Get it right on your first try and win ${fmtOdds(payout(max + 1))}×`;
+    render();
+  }
+
+  function setK(k) {
+    if (guesses.length || done) return;
+    K = Math.min(maxK(), Math.max(1, k));
+    start();
+  }
+  minus.addEventListener('click', () => setK(K - 1));
+  plus.addEventListener('click', () => setK(K + 1));
+
+  // Scale under the bar: the first number of each tenth, plus the last number of the tier.
+  // Each label sits under its number's slot and slides from left- to right-aligned across the bar so none overflow.
+  function drawScale() {
+    const N = max + 1;
+    const vals = [];
+    for (let k = 0; k < 10; k++) vals.push(k * N / 10);
+    if (N > 10) vals.push(max);
+    scaleEl.classList.toggle('tight', digits >= 4);
+    scaleEl.innerHTML = '';
+    vals.forEach((v, i) => {
+      const pos = (v + 0.5) / N;
+      const t = document.createElement('span');
+      if (i % 2 === 1 && i < 10) t.className = 'odd';
+      t.textContent = pad(v);
+      t.style.left = (pos * 100) + '%';
+      t.style.transform = `translateX(${-pos * 100}%)`;
+      scaleEl.appendChild(t);
+    });
+  }
+
+  function setErr(t) { err.textContent = t; input.setAttribute('aria-invalid', t ? 'true' : 'false'); }
+
+  function render() {
+    const span = max + 1;
+    win.style.left = (lo / span * 100) + '%';
+    zlow.style.width = (lo / span * 100) + '%';
+    zhigh.style.width = ((max - hi) / span * 100) + '%';
+    win.style.width = ((hi - lo + 1) / span * 100) + '%';
+    if (!done) {
+      showRange(rangeText());
+      input.placeholder = lo === hi ? pad(lo) : pad(lo) + '–' + pad(hi);
+    }
+
+    const locked = guesses.length > 0 || done;
+    kval.textContent = K;
+    minus.disabled = locked || K <= 1;
+    plus.disabled = locked || K >= maxK();
+    gleftEl.textContent = `${K - guesses.length} of ${K}`;
+
+    input.disabled = done; okKey.disabled = done; delKey.disabled = done;
+    // On the 1-digit tier each key is a whole guess, so ruled-out digits are crossed out.
+    keys.forEach((b, d) => { b.disabled = done || (digits === 1 && (d < lo || d > hi)); });
+
+    if (done) return;
+    const n = hi - lo + 1, p = 1 / n;
+    paidEl.textContent = fmtOdds(payout(n)) + '×';
+  }
+
+  function showRange(text) { rtext.innerHTML = text; }
+  function rangeText() {
+    return lo === hi
+      ? `Only <strong>${pad(lo)}</strong> is left`
+      : `The number is between <strong>${pad(lo)}</strong> and <strong>${pad(hi)}</strong>`;
+  }
+  function markAnswer(v) {
+    const t = document.createElement('span');
+    t.className = 'answer';
+    t.style.left = ((v + 0.5) / (max + 1) * 100) + '%';
+    track.appendChild(t);
+  }
+
+  function guess(v) {
+    if (done) return;
+    if (v < lo || v > hi) {
+      setErr(`${pad(v)} is already ruled out. Pick something from ${pad(lo)} to ${pad(hi)}`);
+      return;
+    }
+    setErr('');
+    guesses.push(v);
+    countEl.textContent = guesses.length;
+    const chip = document.createElement('span');
+    chip.className = 'chip'; chip.textContent = pad(v);
+
+    if (v === secret) {
+      const won = payout(hi - lo + 1);
+      done = true; lo = hi = v;
+      paidEl.textContent = fmtOdds(won) + '×';
+      statusEl.className = 'status win'; arrow.textContent = ''; arrow.hidden = true;
+      msg.textContent = `You got it! It was ${pad(secret)}, in ${guesses.length} ${guesses.length === 1 ? 'guess' : 'guesses'}. You win ${fmtOdds(won)}× your stake`;
+      chip.classList.add('hit');
+      showRange(`You found it: <strong>${pad(v)}</strong>`);
+    } else if (v < secret) {
+      lo = v + 1;
+      statusEl.className = 'status low'; arrow.textContent = '↑'; arrow.hidden = false;
+      msg.textContent = `${pad(v)} is too low. Go higher`;
+      chip.classList.add('low');
+    } else {
+      hi = v - 1;
+      statusEl.className = 'status high'; arrow.textContent = '↓'; arrow.hidden = false;
+      msg.textContent = `${pad(v)} is too high. Go lower`;
+      chip.classList.add('high');
+    }
+    historyEl.appendChild(chip);
+
+    if (!done && guesses.length >= K) {
+      done = true;
+      track.classList.add('over');
+      statusEl.className = 'status lose'; arrow.textContent = ''; arrow.hidden = true;
+      msg.textContent = `Out of guesses. The number was ${pad(secret)}. You lose your stake`;
+      paidEl.textContent = '0.00×';
+      showRange(`It was <strong>${pad(secret)}</strong>. You had it narrowed to ${pad(lo)}–${pad(hi)}`);
+    }
+    render();
+    if (done) { again.hidden = false; again.focus(); }
+  }
+
+  // Physical keyboard still works, in the box or anywhere on the page.
+  input.addEventListener('input', () => {
+    input.value = input.value.replace(/\D/g, '').slice(0, digits);
+    setErr('');
+  });
+  form.addEventListener('submit', e => { e.preventDefault(); submit(); });
+  document.addEventListener('keydown', e => {
+    if (e.target === input || e.target.closest?.('button') && e.key === 'Enter') return;
+    if (/^[0-9]$/.test(e.key)) { typeDigit(e.key); e.preventDefault(); }
+    else if (e.key === 'Backspace') { backspace(); e.preventDefault(); }
+    else if (e.key === 'Enter') { done ? start() : submit(); }
+  });
+  again.addEventListener('click', start);
+  start();
+})();
+</script>
+</body>
+</html>
